@@ -12,19 +12,14 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 //register
 export const register=TryCatch(async(req,res)=>{
-    console.log("Register request received:", req.body);
     const {email,name,password,role}=req.body;
         // basic validation
         if(!email || !name || !password){
             return res.status(400).json({message:"name, email,role  and password are required"});
         }
-        
-        console.log("Checking if user exists...");
-        // let user=await User.findOne({email});
-        // if(user) return res.status(400).json({message:"User already exists"});
-        let user = null; // Skip database check temporarily
+        let user=await User.findOne({email});
+        if(user) return res.status(400).json({message:"User already exists"});
 
-        console.log("Hashing password...");
         //hashed password
         const hashPassword=await bcrypt.hash(password,10);
         user={
@@ -34,38 +29,28 @@ export const register=TryCatch(async(req,res)=>{
             role:role
         }
 
-        console.log("Generating OTP...");
         const otp=Math.floor(Math.random()*1000000);
 
         //jwt.sign(payload, secret, options)
-        console.log("Creating activation token...");
+
         const activationToken=jwt.sign({
             user, //poora obj hi daal diya isme user: name , email and password hai
             otp,
-        },process.env.ACTIVATION_SECRET || "fallback-secret-key",{
+        },process.env.ACTIVATION_SECRET,{
             expiresIn:"50d",
         })
         
         const data={name,otp};
         
-        console.log("Checking email configuration...");
-        // Skip email sending in production if GMAIL not configured
-        if (process.env.GMAIL && process.env.PASSWORD) {
-            console.log("Sending email...");
-            await sendMail(email,"LMS",data)
-        } else {
-            console.log("Email skipped - GMAIL credentials not configured");
-        }
+        await sendMail(email,"LMS",data)
         
-        console.log("Register completed successfully");
        return res.status(200).json({message:"OTP sent to your email",activationToken})
 
 })
 
 export const verifyUser=TryCatch(async(req,res)=>{
     const {otp,activationToken}=req.body;
-    console.log("Verifying user request received:", req.body);
-    const verify=jwt.verify(activationToken,process.env.ACTIVATION_SECRET || "fallback-secret-key");
+    const verify=jwt.verify(activationToken,process.env.ACTIVATION_SECRET);
     console.log(verify)
     if(!verify) return res.status(400).json({message:"Otp expired"})
     if(verify.otp!==otp) return res.status(400).json({message:"invalid otp"})

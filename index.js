@@ -83,10 +83,6 @@ app.get("/", (req, res) => {
   res.send("LMS Server Running 🚀");
 });
 
-app.get("/test", (req, res) => {
-  res.json({ message: "Test endpoint working", timestamp: new Date() });
-});
-
 /* ---------------- 404 ---------------- */
 
 app.use((req, res) => {
