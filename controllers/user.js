@@ -20,8 +20,9 @@ export const register=TryCatch(async(req,res)=>{
         }
         
         console.log("Checking if user exists...");
-        let user=await User.findOne({email});
-        if(user) return res.status(400).json({message:"User already exists"});
+        // let user=await User.findOne({email});
+        // if(user) return res.status(400).json({message:"User already exists"});
+        let user = null; // Skip database check temporarily
 
         console.log("Hashing password...");
         //hashed password
