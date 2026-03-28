@@ -10,7 +10,6 @@ import fs from "fs"
 dotenv.config();
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-register
 export const register=TryCatch(async(req,res)=>{
     const {email,name,password,role}=req.body;
         // basic validation
