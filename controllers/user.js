@@ -11,42 +11,105 @@ dotenv.config();
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 //register
-export const register=TryCatch(async(req,res)=>{
-    const {email,name,password,role}=req.body;
-        // basic validation
-        if(!email || !name || !password){
-            return res.status(400).json({message:"name, email,role  and password are required"});
-        }
-        let user=await User.findOne({email});
-        if(user) return res.status(400).json({message:"User already exists"});
+// export const register=TryCatch(async(req,res)=>{
+//     const {email,name,password,role}=req.body;
+//         // basic validation
+//         if(!email || !name || !password){
+//             return res.status(400).json({message:"name, email,role  and password are required"});
+//         }
+//         let user=await User.findOne({email});
+//         if(user) return res.status(400).json({message:"User already exists"});
 
-        //hashed password
-        const hashPassword=await bcrypt.hash(password,10);
-        user={
-            name:name,
-            email:email,
-            password :hashPassword,
-            role:role
-        }
+//         //hashed password
+//         const hashPassword=await bcrypt.hash(password,10);
+//         user={
+//             name:name,
+//             email:email,
+//             password :hashPassword,
+//             role:role
+//         }
 
-        const otp=Math.floor(Math.random()*1000000);
+//         const otp=Math.floor(Math.random()*1000000);
 
-        //jwt.sign(payload, secret, options)
+//         //jwt.sign(payload, secret, options)
 
-        const activationToken=jwt.sign({
-            user, //poora obj hi daal diya isme user: name , email and password hai
-            otp,
-        },process.env.ACTIVATION_SECRET,{
-            expiresIn:"50d",
-        })
+//         const activationToken=jwt.sign({
+//             user, //poora obj hi daal diya isme user: name , email and password hai
+//             otp,
+//         },process.env.ACTIVATION_SECRET,{
+//             expiresIn:"50d",
+//         })
         
-        const data={name,otp};
+//         const data={name,otp};
         
-        await sendMail(email,"LMS",data)
+//         await sendMail(email,"LMS",data)
         
-       return res.status(200).json({message:"OTP sent to your email",activationToken})
+//        return res.status(200).json({message:"OTP sent to your email",activationToken})
 
-})
+// })
+export const register = TryCatch(async (req, res) => {
+    console.log("Step 1: Register route called"); // 🔹 route hit
+
+    const { email, name, password, role } = req.body;
+
+    console.log("Step 2: Received data:", { email, name, role }); // 🔹 show incoming data
+
+    // basic validation
+    if (!email || !name || !password) {
+        console.log("Step 3: Validation failed - missing fields");
+        return res.status(400).json({ message: "name, email, role and password are required" });
+    }
+
+    // check if user exists
+    let user = await User.findOne({ email });
+    if (user) {
+        console.log("Step 4: User already exists:", email);
+        return res.status(400).json({ message: "User already exists" });
+    }
+
+    // hashed password
+    console.log("Step 5: Hashing password...");
+    const hashPassword = await bcrypt.hash(password, 10);
+    console.log("Step 6: Password hashed");
+
+    // prepare new user object
+    user = {
+        name: name,
+        email: email,
+        password: hashPassword,
+        role: role
+    };
+    console.log("Step 7: User object created:", user);
+
+    // generate OTP
+    const otp = Math.floor(Math.random() * 1000000);
+    console.log("Step 8: OTP generated:", otp);
+
+    // generate activation token
+    console.log("Step 9: Creating JWT token...");
+    const activationToken = jwt.sign(
+        { user, otp },
+        process.env.ACTIVATION_SECRET,
+        { expiresIn: "50d" }
+    );
+    console.log("Step 10: JWT token created");
+
+    // send email
+    try {
+        console.log("Step 11: Sending email...");
+        const data = { name, otp };
+        await sendMail(email, "LMS", data);
+        console.log("Step 12: Email sent successfully");
+    } catch (emailError) {
+        console.error("Step 12 ERROR: Email sending failed:", emailError);
+        // still return response so frontend doesn't hang
+        return res.status(500).json({ message: "Failed to send email", error: emailError.message });
+    }
+
+    // finally return response
+    console.log("Step 13: Returning success response to frontend");
+    return res.status(200).json({ message: "OTP sent to your email", activationToken });
+});
 
 export const verifyUser=TryCatch(async(req,res)=>{
     const {otp,activationToken}=req.body;
