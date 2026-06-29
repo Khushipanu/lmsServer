@@ -56,9 +56,12 @@ export const deleteLecture=TryCatch(async(req,res)=>{
     if(course.createdBy.toString() !==req.user._id.toString()){
         return res.status(401).json({message:"Unauthorized,You cannot delete this lecture"})
     }
-    rm(lecture.video,()=>{    //sever files se bhi to delete krna hia
-        console.log("video deleted")
-    })
+
+    if (lecture.video) {
+        rm(lecture.video,()=>{    //sever files se bhi to delete krna hia
+            console.log("video deleted")
+        })
+    }
     await lecture.deleteOne();
     res.json({messge:"Lecture deleted"})
     
@@ -69,6 +72,8 @@ const unlinkAsync=promisify(fs.unlink)
  
 export const deleteCourse=TryCatch(async(req,res)=>{
     const course=await Course.findById(req.params.id);
+    if(!course) return res.status(404).json({message:"No Course found"})
+
     const lectures=await Lecture.find({course:course._id});
     if(course.createdBy.toString()!==req.user._id.toString()){
         return res.status(401).json({message:"Unauthorized,You cannot delete this course"})
@@ -76,14 +81,18 @@ export const deleteCourse=TryCatch(async(req,res)=>{
 
 //delete all lecture videos
     await Promise.all(lectures.map(async(lecture)=>{
-        await unlinkAsync(lecture.video);
-        console.log("video deleted")
+        if (lecture.video) {
+            await unlinkAsync(lecture.video);
+            console.log("video deleted")
+        }
     }))
 
     //del course image
-  rm(course.image,()=>{
-    console.log("image deleted");
-  })
+    if (course.image) {
+        rm(course.image,()=>{
+            console.log("image deleted");
+        })
+    }
   //del all lectures
   await Lecture.find({course:req.params.id}).deleteMany()
   //del the course
@@ -126,9 +135,9 @@ export const getAllUser = TryCatch(async (req, res) => {
         users = await User.find({ _id: { $ne: req.user._id } }).select("-password");
     } else if (req.user.role === "instructor") {
         // Instructor sees only students enrolled in their courses
-        const instructorCourses = await Course.find({ createdBy: req.user._id }).select("students");
-        const studentIds = instructorCourses.flatMap(c => c.students);
-        users = await User.find({ _id: { $in: studentIds } }).select("-password");
+        const instructorCourses = await Course.find({ createdBy: req.user._id }).select("_id");
+        const instructorCourseIds = instructorCourses.map((c) => c._id);
+        users = await User.find({ subscription: { $in: instructorCourseIds } }).select("-password");
     } else {
         return res.status(403).json({ message: "Forbidden" });
     }
@@ -148,7 +157,7 @@ export const updateRole=TryCatch(async(req,res)=>{
         user.role="admin";
         await user.save()
 
-        return res.staus(200).json({message:"Role updated to admin"})
+        return res.status(200).json({message:"Role updated to admin"})
     }
 
         if(user.role === "admin"){
@@ -166,13 +175,12 @@ export const updateUserProfile=TryCatch(async(req,res)=>{
     if(req.user._id.toString()!==user._id.toString()){
         return res.status(401).json({message:"Unauthorized"})
     }
-    const {name,email,password,role}=req.body;
-    user.name=name;
-    user.email=email;
+    const {name,email,password}=req.body;
+    if(name) user.name=name;
+    if(email) user.email=email;
     if(password){
         user.password=await bcrypt.hash(password,10);
     }
-    user.role=role;
     await user.save();
     res.json({message:"Profile updated",user})
 

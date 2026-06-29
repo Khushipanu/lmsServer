@@ -36,7 +36,7 @@ export const register=TryCatch(async(req,res)=>{
             user, //poora obj hi daal diya isme user: name , email and password hai
             otp,
         },process.env.ACTIVATION_SECRET,{
-            expiresIn:"50d",
+            expiresIn:"15m",
         })
         
         const data={name,otp};
@@ -84,7 +84,7 @@ export const verifyUser=TryCatch(async(req,res)=>{
         const token=jwt.sign({
              _id:user._id,
              role:user.role
-        },process.env.JWT_SECRET_KEY,{expiresIn:"55d"});
+        },process.env.JWT_SECRET_KEY,{expiresIn:"7d"});
         
         return res.json({message:`Welcome back!! ${user.name}`,token,user})
 
@@ -151,7 +151,7 @@ export const verifyUser=TryCatch(async(req,res)=>{
     },
     process.env.JWT_SECRET_KEY,
     {
-      expiresIn: "55d",
+      expiresIn: "7d",
     }
   );
 
@@ -169,7 +169,9 @@ export const verifyUser=TryCatch(async(req,res)=>{
          
         const token=jwt.sign({
             email
-        },process.env.FORGOT_SECRET_KEY)
+        },process.env.FORGOT_SECRET_KEY,{
+            expiresIn:"15m"
+        })
 
         const data={email,token};
         await sendForgotMail("LMS",data);

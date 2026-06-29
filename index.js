@@ -1,6 +1,9 @@
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import morgan from "morgan";
 import Razorpay from "razorpay";
 import passport from "./config/passport.js";
 import { createServer } from "node:http";
@@ -8,6 +11,7 @@ import { Server } from "socket.io";
 
 import { connectDB } from "./database/db.js";
 import { generateResponse } from "./src/service/ai.service.js";
+import { checkEnv } from "./config/envCheck.js";
 
 import userRoutes from "./routes/user.js";
 import courseRoutes from "./routes/courses.js";
@@ -17,22 +21,42 @@ import queryRoutes from "./routes/query.js";
 
 
 dotenv.config();
+checkEnv();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
 const server = createServer(app);
 
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173",
-      "https://lmsclient-ruddy.vercel.app",
-    ],
-    methods:["GET","POST","PUT","DELETE"],
-    credentials: true,
-  })
-);
+/* ---------------- CORS ORIGIN ---------------- */
+
+const rawClientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+const allowedOrigins = rawClientUrl.split(",").map((origin) => origin.trim());
+
+const corsOptions = {
+  origin: allowedOrigins,
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true,
+};
+
+/* ---------------- SECURITY & LOGGING ---------------- */
+
+app.use(helmet());
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // limit each IP to 1000 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests, please try again later." },
+});
+
+app.use("/api", apiLimiter);
+app.use("/auth", apiLimiter);
+
+app.use(morgan("dev"));
+
+app.use(cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -44,14 +68,7 @@ app.use(passport.initialize());
 /* ---------------- SOCKET.IO ---------------- */
 
 const io = new Server(server, {
-  cors: {
-    origin: [
-      "http://localhost:5173",
-      "https://lmsclient-ruddy.vercel.app",
-    ],
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true,
-  },
+  cors: corsOptions,
 });
 
 /* ---------------- RAZORPAY ---------------- */
@@ -84,10 +101,10 @@ app.get("/", (req, res) => {
   res.send("LMS Server Running 🚀");
 });
 
-/* ---------------- 404 ---------------- */
+/* ---------------- HEALTH CHECK ---------------- */
 
-app.use((req, res) => {
-  res.status(404).json({ message: "Request not found" });
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
 });
 
 /* ---------------- SOCKET LOGIC ---------------- */
@@ -125,7 +142,31 @@ io.on("connection", (socket) => {
   });
 });
 
+/* ---------------- 404 ---------------- */
+
+app.use((req, res) => {
+  res.status(404).json({ message: "Request not found" });
+});
+
+/* ---------------- GLOBAL ERROR HANDLER ---------------- */
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({
+    message: err.message || "Internal Server Error",
+  });
+});
+
 /* ---------------- SERVER START ---------------- */
+
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`❌ Port ${port} is already in use. Please stop the other server instance and try again.`);
+  } else {
+    console.error("❌ Server failed to start:", err.message);
+  }
+  process.exit(1);
+});
 
 server.listen(port, () => {
   console.log(`Server running on port ${port}`);
