@@ -17,13 +17,36 @@ const sampleVideos = [
 
 const demoCourses = [
   {
+    title: "Java Programming Masterclass",
+    description:
+      "Learn Java from basics to advanced topics including OOP, collections, multithreading, and building real-world applications.",
+    category: "Development",
+    price: 1799,
+    duration: 10,
+    image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=450&fit=crop",
+    lectures: [
+      {
+        title: "Introduction to Java",
+        description: "Set up Java, write your first program, and understand JVM basics.",
+      },
+      {
+        title: "Object-Oriented Programming",
+        description: "Classes, objects, inheritance, polymorphism, and encapsulation.",
+      },
+      {
+        title: "Collections Framework",
+        description: "Lists, sets, maps, and working with data efficiently in Java.",
+      },
+    ],
+  },
+  {
     title: "Complete Web Development Bootcamp",
     description:
       "Learn HTML, CSS, JavaScript, React, Node.js, and MongoDB from scratch. Build real-world projects and become a full-stack developer.",
     category: "Development",
     price: 1999,
     duration: 12,
-    image: "https://placehold.co/800x450/4f46e5/ffffff?text=Web+Development",
+    image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=450&fit=crop",
     lectures: [
       {
         title: "Introduction to Web Development",
@@ -46,7 +69,7 @@ const demoCourses = [
     category: "Data Science",
     price: 2499,
     duration: 10,
-    image: "https://placehold.co/800x450/06b6d4/ffffff?text=Data+Science",
+    image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=450&fit=crop",
     lectures: [
       {
         title: "Python for Data Science",
@@ -69,7 +92,7 @@ const demoCourses = [
     category: "Design",
     price: 1499,
     duration: 8,
-    image: "https://placehold.co/800x450/ec4899/ffffff?text=UI%2FUX+Design",
+    image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=450&fit=crop",
     lectures: [
       {
         title: "Design Thinking Process",
@@ -110,16 +133,13 @@ async function seed() {
     for (const courseData of demoCourses) {
       const { lectures, ...courseFields } = courseData;
 
-      let course = await Course.findOne({ title: courseFields.title });
-      if (!course) {
-        course = await Course.create({
-          ...courseFields,
-          createdBy: admin._id,
-        });
-        console.log("✅ Created course:", course.title);
-      } else {
-        console.log("⏩ Course already exists:", course.title);
-      }
+      // Upsert course so image/description stays consistent on every seed run
+      let course = await Course.findOneAndUpdate(
+        { title: courseFields.title },
+        { ...courseFields, createdBy: admin._id },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+      console.log("✅ Synced course:", course.title);
 
       for (let i = 0; i < lectures.length; i++) {
         const lectureData = lectures[i];
@@ -141,6 +161,11 @@ async function seed() {
         }
       }
     }
+
+    // Unify all course images to the same neutral placeholder (no text)
+    const unifiedImage = "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=450&fit=crop";
+    await Course.updateMany({}, { image: unifiedImage });
+    console.log("🖼️  Unified all course images to the same neutral placeholder");
 
     console.log("\n🎉 Seed completed successfully!");
     console.log("\nDemo admin login:");
