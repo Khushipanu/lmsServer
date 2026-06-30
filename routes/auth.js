@@ -6,7 +6,8 @@ import User from "../models/user.model.js";
 import { isAuth } from "../middlewares/isAuth.js";
 
 const router = express.Router();
-const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+const rawClientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+const clientUrl = rawClientUrl.replace(/\/+$/, "");
 
 const googleVerify = async (accessToken, refreshToken, profile, done) => {
   try {
