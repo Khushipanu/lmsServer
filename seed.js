@@ -23,7 +23,7 @@ const demoCourses = [
     category: "Development",
     price: 1799,
     duration: 10,
-    image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=450&fit=crop",
+    image: "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=800&h=450&fit=crop",
     lectures: [
       {
         title: "Introduction to Java",
@@ -46,7 +46,7 @@ const demoCourses = [
     category: "Development",
     price: 1999,
     duration: 12,
-    image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=450&fit=crop",
+    image: "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=800&h=450&fit=crop",
     lectures: [
       {
         title: "Introduction to Web Development",
@@ -69,7 +69,7 @@ const demoCourses = [
     category: "Data Science",
     price: 2499,
     duration: 10,
-    image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=450&fit=crop",
+    image: "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=800&h=450&fit=crop",
     lectures: [
       {
         title: "Python for Data Science",
@@ -92,7 +92,7 @@ const demoCourses = [
     category: "Design",
     price: 1499,
     duration: 8,
-    image: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=450&fit=crop",
+    image: "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=800&h=450&fit=crop",
     lectures: [
       {
         title: "Design Thinking Process",
@@ -163,7 +163,7 @@ async function seed() {
     }
 
     // Unify all course images to the same neutral placeholder (no text)
-    const unifiedImage = "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=450&fit=crop";
+    const unifiedImage = "https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=800&h=450&fit=crop";
     await Course.updateMany({}, { image: unifiedImage });
     console.log("🖼️  Unified all course images to the same neutral placeholder");
 
