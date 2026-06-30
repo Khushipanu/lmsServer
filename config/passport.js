@@ -6,12 +6,16 @@ import User from "../models/user.model.js";
 
 dotenv.config();
 
+const rawGoogleCallbackUrl = process.env.GOOGLE_CALLBACK_URL || "http://localhost:8080/auth/google/callback";
+const googleCallbackUrl = rawGoogleCallbackUrl.replace(/\/+$/, "");
+console.log("🔑 Google OAuth callback URL:", googleCallbackUrl);
+
 passport.use(
   new GoogleStrategy(
     {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: process.env.GOOGLE_CALLBACK_URL || "http://localhost:8080/auth/google/callback",
+      callbackURL: googleCallbackUrl,
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
