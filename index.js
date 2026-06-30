@@ -31,10 +31,25 @@ const server = createServer(app);
 /* ---------------- CORS ORIGIN ---------------- */
 
 const rawClientUrl = process.env.CLIENT_URL || "http://localhost:5173";
-const allowedOrigins = rawClientUrl.split(",").map((origin) => origin.trim());
+const allowedOrigins = rawClientUrl
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/+$/, ""));
+
+console.log("🌐 Allowed CORS origins:", allowedOrigins);
 
 const corsOptions = {
-  origin: allowedOrigins,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (e.g., curl, mobile apps, server-to-server)
+    if (!origin) return callback(null, true);
+
+    const cleanOrigin = origin.replace(/\/+$/, "");
+    if (allowedOrigins.includes(cleanOrigin)) {
+      return callback(null, true);
+    }
+
+    console.error(`❌ CORS blocked origin: ${origin}`);
+    callback(new Error("Not allowed by CORS"));
+  },
   methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true,
 };
