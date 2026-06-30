@@ -86,6 +86,10 @@ export const checkout=TryCatch(async(req,res)=>{
         return res.status(400).json({message:"You already have this course"})
     }
 
+    if (!instance) {
+        return res.status(503).json({ message: "Payment service is not configured. Please set Razorpay keys." });
+    }
+
     const options={
         amount:Number(course.price * 100),
         currency:"INR", 
