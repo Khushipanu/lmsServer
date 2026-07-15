@@ -9,7 +9,7 @@ const requiredEnv = [
 ];
 
 const oauthEnv = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_CALLBACK_URL"];
-const mailEnv = ["GMAIL", "PASSWORD"];
+const mailEnv = ["RESEND_API_KEY", "EMAIL_FROM"];
 const paymentEnv = ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"];
 
 export function checkEnv() {
@@ -33,7 +33,7 @@ export function checkEnv() {
   if (mailMissing.length) {
     console.warn("⚠️  Email sending may not work. Missing:", mailMissing.join(", "));
   } else {
-    console.log("✅ Email SMTP configured");
+    console.log("✅ Email (Resend) configured");
   }
 
   const paymentMissing = paymentEnv.filter((key) => !process.env[key]);

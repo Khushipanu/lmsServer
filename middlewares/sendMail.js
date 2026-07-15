@@ -1,167 +1,122 @@
- /*
- email →
-Ye us insaan ka receiver email address hai jisko mail bhejna hai.
-Example: "friend@gmail.com"
+/*
+ email → Ye us insaan ka receiver email address hai jisko mail bhejna hai.
+ Example: "friend@gmail.com"
 
-subject →
-Ye email ka title / heading hoga.
-Example: "Your OTP Code"
+ subject → Ye email ka title / heading hoga.
+ Example: "Your OTP Code"
 
-data →
-Ye ek object hai jisme extra details hoti hain jo mail ke andar dikhengi.
-Example:
+ data → Ye ek object hai jisme extra details hoti hain jo mail ke andar dikhengi.
+ Example: { name: "Khushi", otp: 123456 }
 
-{ name: "Khushi", otp: 123456 }
+ data.name → receiver ka naam (mail me "Hello Khushi" aayega)
+ data.otp → OTP number jo mail me show hoga
 
-
-data.name → receiver ka naam (mail me “Hello Khushi” aayega)
-
-data.otp → OTP number jo mail me show hoga
- 
- */
-
-
-
+ NOTE: Email is sent via Resend's HTTP API instead of Gmail SMTP.
+ Render (and most free hosts) block outgoing SMTP ports, which is why
+ nodemailer + Gmail worked locally but failed once deployed. Resend
+ talks over plain HTTPS, so it works the same everywhere.
+*/
 
 import dotenv from "dotenv";
 dotenv.config();
-import nodemailer from 'nodemailer';
+import { Resend } from "resend";
 
-const sendMail = async (email, subject, data) => {
-    try {
-        console.log("🔹 Attempting to send email to:", email);
-        console.log("🔹 Gmail configured:", !!process.env.GMAIL);
-        
-        if (!process.env.GMAIL || !process.env.PASSWORD) {
-            throw new Error("GMAIL credentials not configured");
-        }
-        
-        // const transporter = nodemailer.createTransport({
-        //     service: 'gmail',
-        //     auth: {
-        //         user: process.env.GMAIL,
-        //         pass: process.env.PASSWORD,
-        //     },
-        // });
-        const transporter = nodemailer.createTransport({
-            host: "smtp.gmail.com", // Gmail SMTP server
-            port: 587,              // Use 587 for cloud servers
-            secure: false,          // false for 587
-            auth: {
-                user: process.env.GMAIL,
-                pass: process.env.PASSWORD, // 16-char App Password
-            },
-            tls: {
-                rejectUnauthorized: false // avoids SSL issues on Render
-            }
-        });
-
-        
-        const html = `<h1>OTP Verification</h1><p>Hello ${data.name}, your OTP is: <strong>${data.otp}</strong></p>`;
-        
-        const info = await transporter.sendMail({
-            from:process.env.GMAIL,
-            to:email,
-            subject,
-            html,
-        });
-        
-        console.log("✅ Email sent successfully:", info.messageId);
-        return info;
-        
-    } catch (error) {
-        console.error("❌ Email sending failed:", error.message);
-        throw error;
+const getResendClient = () => {
+    if (!process.env.RESEND_API_KEY) {
+        throw new Error("RESEND_API_KEY is not configured");
     }
+    return new Resend(process.env.RESEND_API_KEY);
 };
 
-
-
-
-
-export const sendForgotMail=async(subject,data)=>{
-    
-    const transporter=nodemailer.createTransport({
-      host:"smtp.gmail.com",
-      port:587,
-      secure:false,
-      auth:{
-        user:process.env.GMAIL,
-        pass:process.env.PASSWORD
-      },
-      tls:{rejectUnauthorized: false}
-    })
-    const html = `<!DOCTYPE html>
+const brandWrapper = (title, bodyHtml) => `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Reset Your Password</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f3f3f3;
-      margin: 0;
-      padding: 0;
-    }
-    .container {
-      background-color: #ffffff;
-      padding: 20px;
-      margin: 20px auto;
-      border-radius: 8px;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-      max-width: 600px;
-    }
-    h1 {
-      color: #5a2d82;
-    }
-    p {
-      color: #666666;
-    }
-    .button {
-      display: inline-block;
-      padding: 15px 25px;
-      margin: 20px 0;
-      background-color: #5a2d82;
-      color: white;
-      text-decoration: none;
-      border-radius: 4px;
-      font-size: 16px;
-    }
-    .footer {
-      margin-top: 20px;
-      color: #999999;
-      text-align: center;
-    }
-    .footer a {
-      color: #5a2d82;
-      text-decoration: none;
-    }
-  </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title}</title>
 </head>
-<body>
-  <div class="container">
-    <h1>Reset Your Password</h1>
-    <p>Hello,</p>
-    <p>You have requested to reset your password. Please click the button below to reset your password.</p>
-    <a href="${process.env.CLIENT_URL || process.env.frontendurl || "http://localhost:5173"}/reset-password/${data.token}" class="button">Reset Password</a>
-    <p>If you did not request this, please ignore this email.</p>
-    <div class="footer">
-      <p>Thank you,<br>Your Website Team</p>
-      <p><a href="https://yourwebsite.com">yourwebsite.com</a></p>
-    </div>
-  </div>
+<body style="margin:0;padding:0;background-color:#f1f0fb;font-family:'Segoe UI',Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;background-color:#f1f0fb;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 8px 24px rgba(79,70,229,0.12);">
+          <tr>
+            <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:28px 32px;">
+              <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:0.5px;">LMS &middot; Learning Management System</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px;color:#1f2937;">
+              ${bodyHtml}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 32px;background:#f8f7ff;text-align:center;">
+              <p style="margin:0;color:#9ca3af;font-size:12px;">If you didn't request this, you can safely ignore this email.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
-</html>
-`;
-    await transporter.sendMail({
-    from:process.env.GMAIL,
-    to:data.email,  //jisko bhej rhe hai
-    subject,
-    html
+</html>`;
 
-})
-    
+const sendMail = async (email, subject, data) => {
+    console.log("Attempting to send email to:", email);
 
-}
+    const resend = getResendClient();
+
+    const body = `
+      <h1 style="margin:0 0 12px;color:#312e81;font-size:22px;">Verify your email</h1>
+      <p style="margin:0 0 20px;color:#4b5563;font-size:15px;line-height:1.6;">Hello ${data.name}, use the code below to finish creating your account. It expires in 15 minutes.</p>
+      <div style="margin:0 auto 20px;text-align:center;">
+        <span style="display:inline-block;padding:14px 28px;background:#eef2ff;color:#4338ca;font-size:28px;font-weight:700;letter-spacing:6px;border-radius:10px;">${data.otp}</span>
+      </div>
+    `;
+
+    const { data: result, error } = await resend.emails.send({
+        from: process.env.EMAIL_FROM || "onboarding@resend.dev",
+        to: email,
+        subject,
+        html: brandWrapper("OTP Verification", body),
+    });
+
+    if (error) {
+        console.error("Email sending failed:", error.message || error);
+        throw new Error(error.message || "Failed to send email");
+    }
+
+    console.log("Email sent successfully:", result?.id);
+    return result;
+};
+
+export const sendForgotMail = async (subject, data) => {
+    const resend = getResendClient();
+
+    const resetUrl = `${process.env.CLIENT_URL || process.env.frontendurl || "http://localhost:5173"}/reset-password/${data.token}`;
+
+    const body = `
+      <h1 style="margin:0 0 12px;color:#312e81;font-size:22px;">Reset your password</h1>
+      <p style="margin:0 0 24px;color:#4b5563;font-size:15px;line-height:1.6;">We received a request to reset your password. Click the button below to choose a new one. This link expires in 15 minutes.</p>
+      <div style="text-align:center;margin-bottom:8px;">
+        <a href="${resetUrl}" style="display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;border-radius:10px;">Reset Password</a>
+      </div>
+    `;
+
+    const { data: result, error } = await resend.emails.send({
+        from: process.env.EMAIL_FROM || "onboarding@resend.dev",
+        to: data.email,
+        subject,
+        html: brandWrapper("Reset Your Password", body),
+    });
+
+    if (error) {
+        console.error("Forgot-password email failed:", error.message || error);
+        throw new Error(error.message || "Failed to send email");
+    }
+
+    return result;
+};
+
 export default sendMail;
