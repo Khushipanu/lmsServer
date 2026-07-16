@@ -40,10 +40,27 @@ export const register=TryCatch(async(req,res)=>{
         })
         
         const data={name,otp};
-        
-        await sendMail(email,"LMS",data)
-        
-       return res.status(200).json({message:"OTP sent to your email",activationToken})
+
+        // TEMPORARY DEMO FALLBACK: real email delivery is unreliable right
+        // now (new transactional-email account gets throttled by Gmail).
+        // OTP is logged + returned directly so registration is still
+        // usable end-to-end. Remove `otp` from the response (and this log)
+        // once email delivery is confirmed working reliably.
+        console.log(`OTP for ${email}: ${otp}`);
+
+        let emailSent = true;
+        try {
+            await sendMail(email,"LMS",data)
+        } catch (err) {
+            emailSent = false;
+            console.error("Email sending failed, continuing with demo OTP fallback:", err.message);
+        }
+
+       return res.status(200).json({
+            message: emailSent ? "OTP sent to your email" : "Email delivery is currently delayed - use the OTP below",
+            activationToken,
+            otp, // TEMPORARY: remove once real email delivery is confirmed reliable
+        })
 
 })
 
