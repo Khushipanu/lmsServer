@@ -75,18 +75,53 @@ export const verifyUser=TryCatch(async(req,res)=>{
    
     console.log(verify.user.name) //janki
 
-    await User.create({
-       name:verify.user.name,
-       email:verify.user.email,
-       password:verify.user.password,
-       role:verify.user.role,
-    })
-   return res.json({
-        message:"User registered"
-    })
+    let verify;
 
-    })
+    try {
+        verify = jwt.verify(
+            activationToken,
+            process.env.ACTIVATION_SECRET
+        );
+    } catch (error) {
+        return res.status(400).json({
+            message: "OTP expired or invalid token",
+        });
+    }
 
+    console.log("JWT OTP:", verify.otp, typeof verify.otp);
+    console.log("User OTP:", otp, typeof otp);
+
+    // Compare after converting both to string
+    if (String(verify.otp) !== String(otp)) {
+        return res.status(400).json({
+            message: "Invalid OTP",
+        });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({
+        email: verify.user.email,
+    });
+
+    if (existingUser) {
+        return res.status(400).json({
+            message: "User already exists",
+        });
+    }
+
+    const user = await User.create({
+        name: verify.user.name,
+        email: verify.user.email,
+        password: verify.user.password,
+        role: verify.user.role,
+    });
+
+    return res.status(201).json({
+        success: true,
+        message: "User registered successfully",
+        user,
+    });
+});
 
     export const login=TryCatch(async(req,res)=>{
         const {email,password}=req.body;

@@ -1,28 +1,18 @@
-/*
- email → Ye us insaan ka receiver email address hai jisko mail bhejna hai.
- Example: "friend@gmail.com"
-
- subject → Ye email ka title / heading hoga.
- Example: "Your OTP Code"
-
- data → Ye ek object hai jisme extra details hoti hain jo mail ke andar dikhengi.
- Example: { name: "Khushi", otp: 123456 }
-
- data.name → receiver ka naam (mail me "Hello Khushi" aayega)
- data.otp → OTP number jo mail me show hoga
-
- NOTE: Sends via Brevo's HTTP transactional email API instead of SMTP.
- Gmail SMTP hung indefinitely on Render (outbound SMTP silently
- dropped), so this uses a plain HTTPS call instead, which isn't
- affected by that. BREVO_API_KEY + EMAIL_FROM (a Brevo-verified
- single sender) must be set wherever this runs, including Render's
- dashboard (Render env vars are separate from local .env).
-*/
-
 import dotenv from "dotenv";
+import nodemailer from "nodemailer";
+
 dotenv.config();
 
-const BREVO_ENDPOINT = "https://api.brevo.com/v3/smtp/email";
+// Zoho SMTP Configuration
+const transporter = nodemailer.createTransport({
+    host: "smtp.zoho.in", // India ke liye .in use karein
+    port: 465,
+    secure: true, // true for 465
+    auth: {
+        user: process.env.EMAIL_USER, // Zoho email address
+        pass: process.env.EMAIL_PASS, // Zoho App Password (NOT your normal password)
+    },
+});
 
 const brandWrapper = (title, bodyHtml) => `<!DOCTYPE html>
 <html lang="en">
@@ -58,37 +48,7 @@ const brandWrapper = (title, bodyHtml) => `<!DOCTYPE html>
 </body>
 </html>`;
 
-const sendViaBrevo = async ({ to, subject, html }) => {
-    if (!process.env.BREVO_API_KEY || !process.env.EMAIL_FROM) {
-        throw new Error("Brevo credentials not configured");
-    }
-
-    const response = await fetch(BREVO_ENDPOINT, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            "api-key": process.env.BREVO_API_KEY,
-        },
-        body: JSON.stringify({
-            sender: { email: process.env.EMAIL_FROM, name: "LMS" },
-            to: [{ email: to }],
-            subject,
-            htmlContent: html,
-        }),
-    });
-
-    const result = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-        const message = result?.message || `Brevo request failed with status ${response.status}`;
-        throw new Error(message);
-    }
-
-    return result;
-};
-
-const sendMail = async (email, subject, data) => {
+export const sendMail = async (email, subject, data) => {
     console.log("Attempting to send email to:", email);
 
     const body = `
@@ -99,14 +59,20 @@ const sendMail = async (email, subject, data) => {
       </div>
     `;
 
-    const result = await sendViaBrevo({
-        to: email,
-        subject,
-        html: brandWrapper("OTP Verification", body),
-    });
-
-    console.log("Email sent successfully:", result?.messageId);
-    return result;
+    try {
+        const info = await transporter.sendMail({
+            from: `"LMS" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: subject,
+            html: brandWrapper("OTP Verification", body),
+        });
+        
+        console.log("Email sent successfully:", info.messageId);
+        return info;
+    } catch (error) {
+        console.error("Error sending email:", error);
+        throw new Error("Failed to send email");
+    }
 };
 
 export const sendForgotMail = async (subject, data) => {
@@ -120,11 +86,19 @@ export const sendForgotMail = async (subject, data) => {
       </div>
     `;
 
-    return sendViaBrevo({
-        to: data.email,
-        subject,
-        html: brandWrapper("Reset Your Password", body),
-    });
+    try {
+        const info = await transporter.sendMail({
+            from: `"LMS" <${process.env.EMAIL_USER}>`,
+            to: data.email,
+            subject: subject,
+            html: brandWrapper("Reset Your Password", body),
+        });
+        
+        return info;
+    } catch (error) {
+        console.error("Error sending forgot password email:", error);
+        throw new Error("Failed to send reset email");
+    }
 };
 
 export default sendMail;
