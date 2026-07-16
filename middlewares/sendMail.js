@@ -1,18 +1,11 @@
 import dotenv from "dotenv";
-import nodemailer from "nodemailer";
+import { Resend } from 'resend';
 
 dotenv.config();
 
-// Zoho SMTP Configuration
-const transporter = nodemailer.createTransport({
-    host: "smtp.zoho.in", // India ke liye .in use karein
-    port: 465,
-    secure: true, // true for 465
-    auth: {
-        user: process.env.EMAIL_USER, // Zoho email address
-        pass: process.env.EMAIL_PASS, // Zoho App Password (NOT your normal password)
-    },
-});
+// Resend API Initialize
+// Note: Vercel/Render ke Environment Variables mein RESEND_API_KEY zaroor add karein
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const brandWrapper = (title, bodyHtml) => `<!DOCTYPE html>
 <html lang="en">
@@ -60,15 +53,15 @@ export const sendMail = async (email, subject, data) => {
     `;
 
     try {
-        const info = await transporter.sendMail({
-            from: `"LMS" <${process.env.EMAIL_USER}>`,
-            to: email,
+        const response = await resend.emails.send({
+            from: 'LMS <onboarding@resend.dev>', // Agar domain verify nahi kiya hai, toh yahi use karein
+            to: [email],
             subject: subject,
             html: brandWrapper("OTP Verification", body),
         });
         
-        console.log("Email sent successfully:", info.messageId);
-        return info;
+        console.log("Email sent successfully:", response.id);
+        return response;
     } catch (error) {
         console.error("Error sending email:", error);
         throw new Error("Failed to send email");
@@ -87,14 +80,14 @@ export const sendForgotMail = async (subject, data) => {
     `;
 
     try {
-        const info = await transporter.sendMail({
-            from: `"LMS" <${process.env.EMAIL_USER}>`,
-            to: data.email,
+        const response = await resend.emails.send({
+            from: 'LMS <onboarding@resend.dev>',
+            to: [data.email],
             subject: subject,
             html: brandWrapper("Reset Your Password", body),
         });
         
-        return info;
+        return response;
     } catch (error) {
         console.error("Error sending forgot password email:", error);
         throw new Error("Failed to send reset email");
