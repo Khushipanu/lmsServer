@@ -66,16 +66,14 @@ export const register=TryCatch(async(req,res)=>{
 
 
 
-
-
-export const verifyUser = TryCatch(async (req, res) => {
-    const { otp, activationToken } = req.body;
-
-    if (!otp || !activationToken) {
-        return res.status(400).json({
-            message: "OTP and activation token are required",
-        });
-    }
+export const verifyUser=TryCatch(async(req,res)=>{
+    const {otp,activationToken}=req.body;
+    const verify=jwt.verify(activationToken,process.env.ACTIVATION_SECRET);
+    console.log(verify)
+    if(!verify) return res.status(400).json({message:"Otp expired"})
+    if(verify.otp!==otp) return res.status(400).json({message:"invalid otp"})
+   
+    console.log(verify.user.name) //janki
 
     let verify;
 
