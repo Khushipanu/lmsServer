@@ -11,18 +11,39 @@
  data.name → receiver ka naam (mail me "Hello Khushi" aayega)
  data.otp → OTP number jo mail me show hoga
 
- NOTE: Sends via Brevo's HTTP transactional email API instead of SMTP.
- Gmail SMTP hung indefinitely on Render (outbound SMTP silently
- dropped), so this uses a plain HTTPS call instead, which isn't
- affected by that. BREVO_API_KEY + EMAIL_FROM (a Brevo-verified
- single sender) must be set wherever this runs, including Render's
- dashboard (Render env vars are separate from local .env).
+ NOTE: Sends via Gmail SMTP (nodemailer). Explicit timeouts are set so
+ that if the connection to smtp.gmail.com is ever blocked/dropped by
+ the host, this fails fast with a clear error instead of hanging the
+ request (and the frontend button) forever. GMAIL + PASSWORD (a
+ 16-char Gmail App Password, not the account password) must be set
+ wherever this runs, including Render's dashboard (Render env vars are
+ separate from local .env).
 */
 
 import dotenv from "dotenv";
 dotenv.config();
+import nodemailer from "nodemailer";
 
-const BREVO_ENDPOINT = "https://api.brevo.com/v3/smtp/email";
+const getTransporter = () => {
+    if (!process.env.GMAIL || !process.env.PASSWORD) {
+        throw new Error("GMAIL credentials not configured");
+    }
+    return nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 587,
+        secure: false,
+        auth: {
+            user: process.env.GMAIL,
+            pass: process.env.PASSWORD,
+        },
+        tls: {
+            rejectUnauthorized: false, // avoids SSL issues on Render
+        },
+        connectionTimeout: 15000,
+        greetTimeout: 15000,
+        socketTimeout: 15000,
+    });
+};
 
 const brandWrapper = (title, bodyHtml) => `<!DOCTYPE html>
 <html lang="en">
@@ -58,38 +79,10 @@ const brandWrapper = (title, bodyHtml) => `<!DOCTYPE html>
 </body>
 </html>`;
 
-const sendViaBrevo = async ({ to, subject, html }) => {
-    if (!process.env.BREVO_API_KEY || !process.env.EMAIL_FROM) {
-        throw new Error("Brevo credentials not configured");
-    }
-
-    const response = await fetch(BREVO_ENDPOINT, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            "api-key": process.env.BREVO_API_KEY,
-        },
-        body: JSON.stringify({
-            sender: { email: process.env.EMAIL_FROM, name: "LMS" },
-            to: [{ email: to }],
-            subject,
-            htmlContent: html,
-        }),
-    });
-
-    const result = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-        const message = result?.message || `Brevo request failed with status ${response.status}`;
-        throw new Error(message);
-    }
-
-    return result;
-};
-
 const sendMail = async (email, subject, data) => {
     console.log("Attempting to send email to:", email);
+
+    const transporter = getTransporter();
 
     const body = `
       <h1 style="margin:0 0 12px;color:#312e81;font-size:22px;">Verify your email</h1>
@@ -99,17 +92,20 @@ const sendMail = async (email, subject, data) => {
       </div>
     `;
 
-    const result = await sendViaBrevo({
+    const info = await transporter.sendMail({
+        from: process.env.GMAIL,
         to: email,
         subject,
         html: brandWrapper("OTP Verification", body),
     });
 
-    console.log("Email sent successfully:", result?.messageId);
-    return result;
+    console.log("Email sent successfully:", info.messageId);
+    return info;
 };
 
 export const sendForgotMail = async (subject, data) => {
+    const transporter = getTransporter();
+
     const resetUrl = `${process.env.CLIENT_URL || process.env.frontendurl || "http://localhost:5173"}/reset-password/${data.token}`;
 
     const body = `
@@ -120,7 +116,8 @@ export const sendForgotMail = async (subject, data) => {
       </div>
     `;
 
-    return sendViaBrevo({
+    return transporter.sendMail({
+        from: process.env.GMAIL,
         to: data.email,
         subject,
         html: brandWrapper("Reset Your Password", body),
