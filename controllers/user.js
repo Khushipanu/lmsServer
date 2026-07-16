@@ -66,27 +66,30 @@ export const register=TryCatch(async(req,res)=>{
 
 
 
-export const verifyUser=TryCatch(async(req,res)=>{
-    const {otp,activationToken}=req.body;
-    const verify=jwt.verify(activationToken,process.env.ACTIVATION_SECRET);
-    console.log(verify)
-    if(!verify) return res.status(400).json({message:"Otp expired"})
-    if(verify.otp!==otp) return res.status(400).json({message:"invalid otp"})
-   
-    console.log(verify.user.name) //janki
+export const verifyUser = TryCatch(async (req, res) => {
+    const { otp, activationToken } = req.body;
+    
+    // Variable ka naam change kar diya taaki conflict na ho
+    const decodedToken = jwt.verify(activationToken, process.env.ACTIVATION_SECRET);
+    
+    console.log(decodedToken);//janki
+    
+    if (!decodedToken) return res.status(400).json({ message: "Otp expired" });
+    if (decodedToken.otp !== otp) return res.status(400).json({ message: "invalid otp" });
+
+    console.log(decodedToken.user.name);
 
     await User.create({
-       name:verify.user.name,
-       email:verify.user.email,
-       password:verify.user.password,
-       role:verify.user.role,
-    })
-   return res.json({
-        message:"User registered"
-    })
-
-    })
-
+        name: decodedToken.user.name,
+        email: decodedToken.user.email,
+        password: decodedToken.user.password,
+        role: decodedToken.user.role,
+    });
+    
+    return res.json({
+        message: "User registered"
+    });
+});
 
     export const login=TryCatch(async(req,res)=>{
         const {email,password}=req.body;
