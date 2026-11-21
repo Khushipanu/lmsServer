@@ -3,7 +3,9 @@ import rateLimit from "express-rate-limit";
 import {
   forgotPassword,
   login,
+  logout,
   myprofile,
+  refresh,
   register,
   resetPassword,
   updateProfile,
@@ -25,6 +27,17 @@ const authLimiter = rateLimit({
 router.post("/user/register", authLimiter, register);
 router.post("/user/verify", authLimiter, verifyUser);
 router.post("/user/login", authLimiter, login);
+// Token refresh is called automatically by the app every ~15 minutes, so it
+// gets its own, looser limit.
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests. Please wait a moment." },
+});
+router.post("/user/refresh", refreshLimiter, refresh);
+router.post("/user/logout", refreshLimiter, logout);
 router.post("/user/forgot", authLimiter, forgotPassword);
 router.post("/user/reset", authLimiter, resetPassword);
 router.get("/user/myprofile", isAuth, myprofile);

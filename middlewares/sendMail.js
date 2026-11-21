@@ -1,17 +1,20 @@
 /*
-  Email sending with three interchangeable providers. The first configured
-  one wins (or force one with EMAIL_PROVIDER=brevo|resend|smtp):
+  Email sending with automatic fallback. Every configured provider is tried
+  in this order until one succeeds (EMAIL_PROVIDER=<name> moves one to the front):
 
-  1. Brevo  (BREVO_API_KEY + EMAIL_FROM)  — HTTPS API, works on Render free.
-  2. Resend (RESEND_API_KEY + EMAIL_FROM) — HTTPS API, works on Render free.
-     Note: until you verify a domain in Resend you can only send to your own
-     Resend account email.
-  3. SMTP   (SMTP_USER + SMTP_PASS [+ SMTP_HOST/SMTP_PORT], or the legacy
-     GMAIL + PASSWORD vars) — Render's FREE plan blocks outgoing SMTP ports
-     (25/465/587), so this only works locally or on a paid instance.
+  1. gmail  (GMAIL_SCRIPT_URL + GMAIL_SCRIPT_SECRET) — RECOMMENDED.
+     A tiny Google Apps Script (server/scripts/gmail-relay.gs) deployed from
+     your Gmail account. The server calls it over plain HTTPS, Google sends
+     the mail from your Gmail. No SMTP, no domain, no third-party API key,
+     works on Render free. Limit: ~100 emails/day on a free Gmail account.
+  2. brevo  (BREVO_API_KEY + EMAIL_FROM)  — HTTPS API. Needs a verified sender.
+  3. resend (RESEND_API_KEY + EMAIL_FROM) — HTTPS API. Needs a verified domain
+     to email anyone but yourself.
+  4. smtp   (SMTP_USER + SMTP_PASS, or legacy GMAIL + PASSWORD) — skipped in
+     production unless EMAIL_PROVIDER=smtp, because Render's free plan blocks
+     outgoing SMTP ports and it would only add a 15s wait before failing.
 
-  Every request has a hard timeout so a stuck provider can never hang a
-  signup request forever (the old cause of "request pending" on Render).
+  Every request has a hard timeout so a stuck provider can never hang signup.
 */
 import "../config/config.js";
 import nodemailer from "nodemailer";
@@ -24,14 +27,29 @@ const smtpUser = () => process.env.SMTP_USER || process.env.GMAIL;
 const smtpPass = () => process.env.SMTP_PASS || process.env.PASSWORD;
 const fromAddress = () => process.env.EMAIL_FROM || smtpUser();
 
-export const getEmailProvider = () => {
-  const forced = (process.env.EMAIL_PROVIDER || "").toLowerCase();
-  if (forced) return forced;
-  if (process.env.BREVO_API_KEY) return "brevo";
-  if (process.env.RESEND_API_KEY) return "resend";
-  if (smtpUser() && smtpPass()) return "smtp";
-  return null;
+const isProduction = process.env.NODE_ENV === "production";
+
+const configured = {
+  gmail: () => Boolean(process.env.GMAIL_SCRIPT_URL && process.env.GMAIL_SCRIPT_SECRET),
+  brevo: () => Boolean(process.env.BREVO_API_KEY && fromAddress()),
+  resend: () => Boolean(process.env.RESEND_API_KEY && fromAddress()),
+  smtp: () => Boolean(smtpUser() && smtpPass()),
 };
+
+/** Providers to try, in order. */
+export const getEmailProviders = () => {
+  const forced = (process.env.EMAIL_PROVIDER || "").toLowerCase();
+  const order = ["gmail", "brevo", "resend", "smtp"];
+  if (order.includes(forced)) order.unshift(...order.splice(order.indexOf(forced), 1));
+  return order.filter((name) => {
+    if (!configured[name]()) return false;
+    if (name === "smtp" && isProduction && forced !== "smtp") return false;
+    return true;
+  });
+};
+
+/** Human-readable summary for /health, e.g. "gmail → brevo". */
+export const getEmailProvider = () => getEmailProviders().join(" → ") || null;
 
 const fetchWithTimeout = async (url, options) => {
   const controller = new AbortController();
@@ -44,6 +62,27 @@ const fetchWithTimeout = async (url, options) => {
   } finally {
     clearTimeout(timer);
   }
+};
+
+const sendViaGmailScript = async ({ to, subject, html }) => {
+  // Apps Script answers a POST with a redirect to the result; fetch follows it.
+  const res = await fetchWithTimeout(process.env.GMAIL_SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({ secret: process.env.GMAIL_SCRIPT_SECRET, to, subject, html, name: APP_NAME }),
+    redirect: "follow",
+  });
+  const text = await res.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Gmail script: unexpected response (HTTP ${res.status}). Redeploy it with "Who has access: Anyone" and use the /exec URL.`
+    );
+  }
+  if (!body.ok) throw new Error(`Gmail script: ${body.error || "send failed"}`);
+  return body;
 };
 
 const sendViaBrevo = async ({ to, subject, html }) => {
@@ -102,18 +141,24 @@ const sendViaSmtp = async ({ to, subject, html }) => {
   return transporter.sendMail({ from: `${APP_NAME} <${fromAddress()}>`, to, subject, html });
 };
 
+const senders = { gmail: sendViaGmailScript, brevo: sendViaBrevo, resend: sendViaResend, smtp: sendViaSmtp };
+
 const deliver = async (message) => {
-  const provider = getEmailProvider();
-  if (!provider) throw new Error("No email provider configured");
-  if (!fromAddress()) throw new Error("EMAIL_FROM is not set");
+  const providers = getEmailProviders();
+  if (!providers.length) throw new Error("No email provider configured");
 
-  const senders = { brevo: sendViaBrevo, resend: sendViaResend, smtp: sendViaSmtp };
-  const send = senders[provider];
-  if (!send) throw new Error(`Unknown EMAIL_PROVIDER "${provider}"`);
-
-  const result = await send(message);
-  console.log(`📧 Email sent via ${provider} to ${message.to}`);
-  return result;
+  const errors = [];
+  for (const name of providers) {
+    try {
+      const result = await senders[name](message);
+      console.log(`📧 Email sent via ${name} to ${message.to}`);
+      return result;
+    } catch (err) {
+      console.error(`⚠️  Email via ${name} failed: ${err.message}`);
+      errors.push(`${name}: ${err.message}`);
+    }
+  }
+  throw new Error(`All email providers failed — ${errors.join(" | ")}`);
 };
 
 const escapeHtml = (str = "") =>

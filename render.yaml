@@ -19,6 +19,10 @@ services:
         generateValue: true
       - key: CLIENT_URL
         sync: false
+      - key: GMAIL_SCRIPT_URL
+        sync: false
+      - key: GMAIL_SCRIPT_SECRET
+        sync: false
       - key: BREVO_API_KEY
         sync: false
       - key: EMAIL_FROM

@@ -30,8 +30,8 @@ export function checkEnv() {
   console.log("🌐 Allowed frontend origins:", getClientUrls().join(", "));
   console.log(
     status.email === "not configured"
-      ? "⚠️  Email not configured — set BREVO_API_KEY (recommended on Render), RESEND_API_KEY or SMTP_* vars"
-      : `✅ Email provider: ${status.email}`
+      ? "⚠️  Email not configured — set GMAIL_SCRIPT_URL + GMAIL_SCRIPT_SECRET (see scripts/gmail-relay.gs), or BREVO_API_KEY / RESEND_API_KEY"
+      : `✅ Email providers (tried in order): ${status.email}`
   );
   console.log(
     status.googleOAuth

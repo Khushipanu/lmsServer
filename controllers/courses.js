@@ -125,10 +125,25 @@ export const paymentVerification = TryCatch(async (req, res) => {
     return res.status(400).json({ message: "Payment verification failed" });
   }
 
+  if (!isId(req.params.id)) return res.status(400).json({ message: "Invalid course id" });
   const course = await Course.findById(req.params.id);
   if (!course) return res.status(404).json({ message: "Course not found" });
 
   const user = await User.findById(req.user._id);
+
+  // The signature only proves "this payment belongs to this order". Also check
+  // the order was created for THIS course and THIS user, otherwise a payment for
+  // a cheap course could be replayed to unlock an expensive one.
+  if (!razorpay) return res.status(503).json({ message: "Payments are not configured on the server yet" });
+  let order;
+  try {
+    order = await razorpay.orders.fetch(razorpay_order_id);
+  } catch {
+    return res.status(400).json({ message: "Payment verification failed" });
+  }
+  if (order.notes?.courseId !== String(course._id) || order.notes?.userId !== String(user._id)) {
+    return res.status(400).json({ message: "This payment doesn't belong to this course" });
+  }
 
   await Payment.updateOne(
     { razorpay_payment_id },

@@ -11,7 +11,8 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import User from "../models/user.model.js";
 import { isAuth } from "../middlewares/isAuth.js";
 import { getClientUrl, isGoogleConfigured } from "../config/config.js";
-import { findByEmail, publicUser, signToken } from "../controllers/user.js";
+import { findByEmail, publicUser } from "../controllers/user.js";
+import { issueTokens } from "../utils/tokens.js";
 
 const router = express.Router();
 
@@ -73,15 +74,22 @@ router.get("/google/callback", (req, res, next) => {
   if (!isGoogleConfigured()) return fail(res, "google_not_configured");
   if (req.query.error) return fail(res, "google_cancelled");
 
-  passport.authenticate(strategyFor(req), { session: false }, (err, user) => {
+  passport.authenticate(strategyFor(req), { session: false }, async (err, user) => {
     if (err) {
       console.error("❌ Google OAuth error:", err.message, "| callback:", callbackUrlFor(req));
       return fail(res, "google_failed");
     }
     if (!user) return fail(res, "google_failed");
 
-    // Token goes in the URL fragment (#) so it never reaches server logs.
-    return res.redirect(`${getClientUrl()}/auth-success#token=${signToken(user)}`);
+    try {
+      // Tokens go in the URL fragment (#), which browsers never send to any
+      // server, so they don't end up in logs. The app reads and removes them.
+      const { accessToken, refreshToken } = await issueTokens(user, req);
+      return res.redirect(`${getClientUrl()}/auth-success#token=${accessToken}&refreshToken=${refreshToken}`);
+    } catch (e) {
+      console.error("❌ Could not issue tokens after Google login:", e.message);
+      return fail(res, "google_failed");
+    }
   })(req, res, next);
 });
 

@@ -132,8 +132,9 @@ io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
     socket.user = jwt.verify(token, process.env.JWT_SECRET_KEY);
     next();
-  } catch {
-    next(new Error("unauthorized"));
+  } catch (err) {
+    // "token_expired" → the app refreshes its access token and reconnects.
+    next(new Error(err.name === "TokenExpiredError" ? "token_expired" : "unauthorized"));
   }
 });
 

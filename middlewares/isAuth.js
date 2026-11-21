@@ -19,8 +19,13 @@ export const isAuth = async (req, res, next) => {
 
     req.user = user;
     next();
-  } catch {
-    return res.status(401).json({ message: "Session expired. Please log in again." });
+  } catch (err) {
+    // TOKEN_EXPIRED tells the app to get a new access token with its refresh
+    // token and retry, instead of logging the user out.
+    if (err.name === "TokenExpiredError") {
+      return res.status(401).json({ message: "Session expired", code: "TOKEN_EXPIRED" });
+    }
+    return res.status(401).json({ message: "Session expired. Please log in again.", code: "INVALID_TOKEN" });
   }
 };
 

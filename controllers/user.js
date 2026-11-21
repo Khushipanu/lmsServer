@@ -5,6 +5,14 @@ import jwt from "jsonwebtoken";
 import User from "../models/user.model.js";
 import sendMail, { sendForgotMail } from "../middlewares/sendMail.js";
 import TryCatch from "../middlewares/TryCatch.js";
+import {
+  TokenError,
+  issueTokens,
+  revokeAllForUser,
+  revokeRefreshToken,
+  rotateRefreshToken,
+  signAccessToken,
+} from "../utils/tokens.js";
 
 const ROLES = ["user", "admin"]; // "admin" = instructor (can create courses)
 const MIN_PASSWORD = 6;
@@ -16,8 +24,8 @@ const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 export const findByEmail = (email) =>
   User.findOne({ email: normalizeEmail(email) }).collation({ locale: "en", strength: 2 });
 
-export const signToken = (user) =>
-  jwt.sign({ _id: user._id, role: user.role }, process.env.JWT_SECRET_KEY, { expiresIn: "7d" });
+/** @deprecated kept for older imports — returns a short-lived access token. */
+export const signToken = signAccessToken;
 
 export const publicUser = (user) => {
   const obj = user.toObject ? user.toObject() : { ...user };
@@ -113,7 +121,31 @@ export const login = TryCatch(async (req, res) => {
   const ok = await bcrypt.compare(password, user.password);
   if (!ok) return res.status(400).json({ message: "Incorrect password" });
 
-  return res.json({ message: `Welcome back, ${user.name}!`, token: signToken(user), user: publicUser(user) });
+  const { accessToken, refreshToken } = await issueTokens(user, req);
+  return res.json({
+    message: `Welcome back, ${user.name}!`,
+    accessToken,
+    refreshToken,
+    token: accessToken, // old clients read `token`
+    user: publicUser(user),
+  });
+});
+
+/** POST /api/user/refresh  { refreshToken } → new { accessToken, refreshToken } */
+export const refresh = async (req, res, next) => {
+  try {
+    const { accessToken, refreshToken, user } = await rotateRefreshToken(req.body?.refreshToken, req);
+    return res.json({ accessToken, refreshToken, token: accessToken, user: publicUser(user) });
+  } catch (err) {
+    if (err instanceof TokenError) return res.status(401).json({ message: err.message, code: err.code });
+    return next(err);
+  }
+};
+
+/** POST /api/user/logout  { refreshToken } — ends this device's session. Always succeeds. */
+export const logout = TryCatch(async (req, res) => {
+  await revokeRefreshToken(req.body?.refreshToken);
+  return res.json({ message: "Logged out" });
 });
 
 export const myprofile = TryCatch(async (req, res) => {
@@ -143,6 +175,13 @@ export const updateProfile = TryCatch(async (req, res) => {
   }
 
   await user.save();
+
+  // New password → sign out every other device and give this one fresh tokens.
+  if (password) {
+    await revokeAllForUser(user._id, "password-changed");
+    const tokens = await issueTokens(user, req);
+    return res.json({ message: "Password updated", user: publicUser(user), ...tokens, token: tokens.accessToken });
+  }
   res.json({ message: "Profile updated", user: publicUser(user) });
 });
 
@@ -188,5 +227,6 @@ export const resetPassword = TryCatch(async (req, res) => {
   user.password = await bcrypt.hash(password, 10);
   user.resetPasswordExpire = null;
   await user.save();
+  await revokeAllForUser(user._id, "password-reset"); // sign out everywhere
   res.json({ message: "Password updated — you can log in now" });
 });
