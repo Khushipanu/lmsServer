@@ -6,16 +6,16 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "seed": "node seed.js"
   },
   "author": "khushipanu",
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@google-cloud/aiplatform": "^5.11.0",
     "@google/genai": "^0.4.0",
-    "@sendgrid/mail": "^8.1.6",
     "bcrypt": "^6.0.0",
+    "cloudinary": "^2.11.0",
     "cors": "^2.8.6",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
@@ -26,11 +26,9 @@
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
     "nodemailer": "^9.0.2",
-    "openai": "^6.7.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "razorpay": "^2.9.6",
-    "resend": "^6.9.4",
     "socket.io": "^4.8.0",
     "uuid": "^11.1.1"
   },
@@ -41,5 +39,8 @@
     "bcrypt@6.0.0": true,
     "protobufjs@7.5.4": true,
     "protobufjs@7.6.4": true
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

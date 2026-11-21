@@ -1,35 +1,32 @@
-import jwt from "jsonwebtoken"
+import "../config/config.js";
+import jwt from "jsonwebtoken";
 import User from "../models/user.model.js";
-import dotenv from "dotenv"
-dotenv.config();
 
-export const isAuth=async(req,res,next)=>{
-    try{
-        const token=req.headers.token;
-        if(!token) return res.status(401).json({message:"pls login"});
-        const decoded=jwt.verify(token,process.env.JWT_SECRET_KEY);
-        req.user=await User.findById(decoded._id);
-        if (process.env.NODE_ENV !== "production") {
-            console.log(req.user)
-        }
-        next();
+const readToken = (req) => {
+  if (req.headers.token) return req.headers.token;
+  const auth = req.headers.authorization || "";
+  return auth.startsWith("Bearer ") ? auth.slice(7) : null;
+};
 
-    }catch(err){
-        return res.status(401).json({message:"login first"})
+export const isAuth = async (req, res, next) => {
+  try {
+    const token = readToken(req);
+    if (!token) return res.status(401).json({ message: "Please log in to continue" });
 
-    }
-}
-export const isAdmin=(req,res,next)=>{
-    try{
-        if(req.user.role!=="admin"){
-            return res.status(403).json({message:"You are not admin"});
-        }
-        next();
-    }catch(err){
-            return res.status(401).json({message:"login first"})
+    const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+    const user = await User.findById(decoded._id).select("-password");
+    if (!user) return res.status(401).json({ message: "Account not found. Please log in again." });
 
-    }
+    req.user = user;
+    next();
+  } catch {
+    return res.status(401).json({ message: "Session expired. Please log in again." });
+  }
+};
 
-    
-
-}
+export const isAdmin = (req, res, next) => {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ message: "Only instructors can do this" });
+  }
+  next();
+};

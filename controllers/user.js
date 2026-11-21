@@ -1,215 +1,192 @@
-import express from "express"
-import bcrypt from 'bcrypt'
-import User from "../models/user.model.js"
-import jwt from 'jsonwebtoken'
-import sendMail, { sendForgotMail } from "../middlewares/sendMail.js"
-import TryCatch from "../middlewares/TryCatch.js"
-import dotenv from "dotenv"
-import { OAuth2Client } from "google-auth-library"
-import fs from "fs"
-dotenv.config();
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+import "../config/config.js";
+import bcrypt from "bcrypt";
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import User from "../models/user.model.js";
+import sendMail, { sendForgotMail } from "../middlewares/sendMail.js";
+import TryCatch from "../middlewares/TryCatch.js";
 
-export const register=TryCatch(async(req,res)=>{
-    const {email,name,password,role}=req.body;
-        // basic validation
-        if(!email || !name || !password){
-            return res.status(400).json({message:"name, email,role  and password are required"});
-        }
-        let user=await User.findOne({email});
-        if(user) return res.status(400).json({message:"User already exists"});
+const ROLES = ["user", "admin"]; // "admin" = instructor (can create courses)
+const MIN_PASSWORD = 6;
 
-        //hashed password
-        const hashPassword=await bcrypt.hash(password,10);
-        user={
-            name:name,
-            email:email,
-            password :hashPassword,
-            role:role
-        }
+const normalizeEmail = (email) => String(email || "").trim().toLowerCase();
 
-        const otp=Math.floor(Math.random()*1000000);
+// Case-insensitive lookup so accounts created before emails were
+// normalised (e.g. "Name@Gmail.com") can still log in.
+export const findByEmail = (email) =>
+  User.findOne({ email: normalizeEmail(email) }).collation({ locale: "en", strength: 2 });
 
-        //jwt.sign(payload, secret, options)
+export const signToken = (user) =>
+  jwt.sign({ _id: user._id, role: user.role }, process.env.JWT_SECRET_KEY, { expiresIn: "7d" });
 
-        const activationToken=jwt.sign({
-            user, //poora obj hi daal diya isme user: name , email and password hai
-            otp,
-        },process.env.ACTIVATION_SECRET,{
-            expiresIn:"15m",
-        })
-        
-        const data={name,otp};
+export const publicUser = (user) => {
+  const obj = user.toObject ? user.toObject() : { ...user };
+  obj.hasPassword = Boolean(obj.password);
+  delete obj.password;
+  delete obj.resetPasswordExpire;
+  return obj;
+};
 
-        // TEMPORARY DEMO FALLBACK: real email delivery is unreliable right
-        // now (new transactional-email account gets throttled by Gmail).
-        // OTP is logged + returned directly so registration is still
-        // usable end-to-end. Remove `otp` from the response (and this log)
-        // once email delivery is confirmed working reliably.
-        console.log(`OTP for ${email}: ${otp}`);
+export const register = TryCatch(async (req, res) => {
+  const name = String(req.body.name || "").trim();
+  const email = normalizeEmail(req.body.email);
+  const { password } = req.body;
+  const role = ROLES.includes(req.body.role) ? req.body.role : "user";
 
-        let emailSent = true;
-        try {
-            await sendMail(email,"LMS",data)
-        } catch (err) {
-            emailSent = false;
-            console.error("Email sending failed, continuing with demo OTP fallback:", err.message);
-        }
-
-       return res.status(200).json({
-            message: emailSent ? "OTP sent to your email" : "Email delivery is currently delayed - use the OTP below",
-            activationToken,
-            otp, // TEMPORARY: remove once real email delivery is confirmed reliable
-        })
-
-})
-
-
-
-
-
-
-export const verifyUser=TryCatch(async(req,res)=>{
-    const {otp,activationToken}=req.body;
-    const verify=jwt.verify(activationToken,process.env.ACTIVATION_SECRET);
-    console.log(verify)
-    if(!verify) return res.status(400).json({message:"Otp expired"})
-    if(verify.otp!==otp) return res.status(400).json({message:"invalid otp"})
-   
-    console.log(verify.user.name) //janki
-
-    await User.create({
-       name:verify.user.name,
-       email:verify.user.email,
-       password:verify.user.password,
-       role:verify.user.role,
-    })
-   return res.json({
-        message:"User registered"
-    })
-
-    })
-
-
-    export const login=TryCatch(async(req,res)=>{
-        const {email,password}=req.body;
-        const user=await User.findOne({email});
-        if(!user) return res.status(400).json({message:"user not found"});
-        const hash=user.password; //db mai already saved hai as hashed password
-        const isPassword=await bcrypt.compare(password,hash);
-        if(!isPassword) return res.status(400).json({message:"wrong password"})
-        const token=jwt.sign({
-             _id:user._id,
-             role:user.role
-        },process.env.JWT_SECRET_KEY,{expiresIn:"7d"});
-        
-        return res.json({message:`Welcome back!! ${user.name}`,token,user})
-
-
-    })
-    export const myprofile=TryCatch(async(req,res)=>{
-        const user=await User.findById(req.user._id);
-        return res.json({user})
-
-
-    })
-
-    // Simple Google OAuth login using an ID token from the client.
-    // The client should obtain `idToken` from Google and POST it to this endpoint.
-   
-
-    export const googleLogin = TryCatch(async (req, res) => {
-
-  const { idToken } = req.body;
-
-  if (!idToken) {
-    return res.status(400).json({
-      message: "Google idToken is required",
-    });
+  if (!name || !email || !password) {
+    return res.status(400).json({ message: "Name, email and password are required" });
+  }
+  if (password.length < MIN_PASSWORD) {
+    return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD} characters` });
   }
 
-  // verify token from Google
-  const ticket = await googleClient.verifyIdToken({
-    idToken,
-    audience: process.env.GOOGLE_CLIENT_ID,
-  });
+  const existing = await findByEmail(email);
+  if (existing) return res.status(400).json({ message: "An account with this email already exists" });
 
-  const payload = ticket.getPayload();
+  const hashPassword = await bcrypt.hash(password, 10);
+  const otp = String(crypto.randomInt(100000, 1000000)); // always 6 digits
 
-  const { sub: googleId, email, name } = payload;
-
-  if (!email) {
-    return res.status(400).json({
-      message: "Google account email is required",
-    });
-  }
-
- 
-  let user = await User.findOne({ email });
-
-  if (!user) {
-    const pseudoPassword = googleId + process.env.JWT_SECRET_KEY;
-
-    const hashedPassword = await bcrypt.hash(pseudoPassword, 10);
-
-    user = await User.create({
-      name: name || email.split("@")[0],
-      email,
-      password: hashedPassword,
-      role: "user",
-    });
-  }
-
-  // generate JWT token
-  const token = jwt.sign(
-    {
-      _id: user._id,
-      role: user.role,
-    },
-    process.env.JWT_SECRET_KEY,
-    {
-      expiresIn: "7d",
-    }
+  const activationToken = jwt.sign(
+    { user: { name, email, password: hashPassword, role }, otp },
+    process.env.ACTIVATION_SECRET,
+    { expiresIn: "15m" }
   );
 
-  return res.json({
-    message: `Welcome back ${user.name}`,
-    token,
-    user,
-  });
+  try {
+    await sendMail(email, "Your verification code", { name, otp });
+    return res.status(200).json({ message: "We sent a 6-digit code to your email", activationToken });
+  } catch (err) {
+    console.error("❌ Signup email failed:", err.message);
+
+    // Optional escape hatch while email isn't set up yet: set
+    // EMAIL_OTP_FALLBACK=true to return the code in the response instead.
+    // Leave it OFF for a real deployment (anyone could sign up with any email).
+    if (process.env.EMAIL_OTP_FALLBACK === "true") {
+      return res.status(200).json({
+        message: "Email delivery is unavailable right now — use the code shown on screen",
+        activationToken,
+        otp,
+      });
+    }
+    return res.status(502).json({
+      message: "We couldn't send the verification email. Please try again in a minute or use Google sign-in.",
+    });
+  }
 });
 
-    export const forgotPassword=TryCatch(async(req,res)=>{
-        const {email}=req.body;
-        const user=await User.findOne({email})
-        if(!user) return res.status(404).json({message:"User doesn't exist"})
-         
-        const token=jwt.sign({
-            email
-        },process.env.FORGOT_SECRET_KEY,{
-            expiresIn:"15m"
-        })
+export const verifyUser = TryCatch(async (req, res) => {
+  const { otp, activationToken } = req.body;
+  if (!otp || !activationToken) return res.status(400).json({ message: "Code is required" });
 
-        const data={email,token};
-        await sendForgotMail("LMS",data);
-        user.resetPasswordExpire=Date.now() + 5 * 60 * 1000;
+  let payload;
+  try {
+    payload = jwt.verify(activationToken, process.env.ACTIVATION_SECRET);
+  } catch {
+    return res.status(400).json({ message: "This code has expired. Please register again." });
+  }
 
-        await user.save();
+  if (String(payload.otp) !== String(otp).trim()) {
+    return res.status(400).json({ message: "Incorrect code. Please check and try again." });
+  }
 
-       return res.json({message:"Reset password Link is send to your mail"});
-    })
-    
-    export const resetPassword=TryCatch(async(req,res)=>{
-        const decoded=jwt.verify(req.query.token,process.env.FORGOT_SECRET_KEY)
-        const user=await User.findOne({email:decoded.email})
-        if(!user) return res.status(404).json({message:"No user with this email"})
-        if(user.resetPasswordExpire ===null) return res.status(400).json({message:"Token expired"})
-        if(user.resetPasswordExpire < Date.now()){
-            return res.status(400).json({message:"Token expired"})
-        }  
-        const password=await bcrypt.hash(req.body.password,10);
-        user.password=password;
-        user.resetPasswordExpire=null;
-        await user.save();
-        res.json({message:"Password reset"});
-    })
+  const exists = await findByEmail(payload.user.email);
+  if (exists) return res.status(400).json({ message: "Account already verified. Please log in." });
+
+  await User.create(payload.user);
+  return res.json({ message: "Account verified! You can log in now." });
+});
+
+export const login = TryCatch(async (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const { password } = req.body;
+  if (!email || !password) return res.status(400).json({ message: "Email and password are required" });
+
+  const user = await findByEmail(email);
+  if (!user) return res.status(400).json({ message: "No account found with this email" });
+
+  if (!user.password) {
+    return res.status(400).json({
+      message: "This account uses Google sign-in. Continue with Google, or use 'Forgot password' to set a password.",
+    });
+  }
+
+  const ok = await bcrypt.compare(password, user.password);
+  if (!ok) return res.status(400).json({ message: "Incorrect password" });
+
+  return res.json({ message: `Welcome back, ${user.name}!`, token: signToken(user), user: publicUser(user) });
+});
+
+export const myprofile = TryCatch(async (req, res) => {
+  const user = await User.findById(req.user._id);
+  return res.json({ user: publicUser(user) });
+});
+
+export const updateProfile = TryCatch(async (req, res) => {
+  const user = await User.findById(req.user._id);
+  const { name, password, currentPassword } = req.body;
+
+  if (name !== undefined) {
+    if (!String(name).trim()) return res.status(400).json({ message: "Name can't be empty" });
+    user.name = String(name).trim();
+  }
+
+  if (password) {
+    if (password.length < MIN_PASSWORD) {
+      return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD} characters` });
+    }
+    // Accounts that already have a password must confirm it first.
+    if (user.password) {
+      const ok = currentPassword && (await bcrypt.compare(currentPassword, user.password));
+      if (!ok) return res.status(400).json({ message: "Current password is incorrect" });
+    }
+    user.password = await bcrypt.hash(password, 10);
+  }
+
+  await user.save();
+  res.json({ message: "Profile updated", user: publicUser(user) });
+});
+
+export const forgotPassword = TryCatch(async (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const user = await findByEmail(email);
+  if (!user) return res.status(404).json({ message: "No account found with this email" });
+
+  const token = jwt.sign({ email }, process.env.FORGOT_SECRET_KEY, { expiresIn: "15m" });
+
+  try {
+    await sendForgotMail("Reset your password", { email, token });
+  } catch (err) {
+    console.error("❌ Reset email failed:", err.message);
+    return res.status(502).json({ message: "We couldn't send the reset email. Please try again in a minute." });
+  }
+
+  user.resetPasswordExpire = Date.now() + 15 * 60 * 1000;
+  await user.save();
+  return res.json({ message: "Reset link sent — check your inbox (and spam folder)" });
+});
+
+export const resetPassword = TryCatch(async (req, res) => {
+  const token = req.query.token || req.body.token;
+  const { password } = req.body;
+  if (!password || password.length < MIN_PASSWORD) {
+    return res.status(400).json({ message: `Password must be at least ${MIN_PASSWORD} characters` });
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.FORGOT_SECRET_KEY);
+  } catch {
+    return res.status(400).json({ message: "This reset link is invalid or has expired" });
+  }
+
+  const user = await findByEmail(decoded.email);
+  if (!user) return res.status(404).json({ message: "No account found" });
+  if (!user.resetPasswordExpire || user.resetPasswordExpire < Date.now()) {
+    return res.status(400).json({ message: "This reset link has already been used or expired" });
+  }
+
+  user.password = await bcrypt.hash(password, 10);
+  user.resetPasswordExpire = null;
+  await user.save();
+  res.json({ message: "Password updated — you can log in now" });
+});

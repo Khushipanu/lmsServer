@@ -1,138 +1,154 @@
-import { instance } from "../index.js";
+import "../config/config.js";
+import crypto from "crypto";
+import mongoose from "mongoose";
+import razorpay from "../config/razorpay.js";
 import TryCatch from "../middlewares/TryCatch.js";
 import Course from "../models/courses.model.js";
 import Lecture from "../models/lecture.model.js";
 import User from "../models/user.model.js";
-import mongoose from "mongoose";
-import crypto from "crypto"
 import { Payment } from "../models/Payment.model.js";
 
-export const getAllCourses=TryCatch(async(req,res)=>{
-    const courses=await Course.find();
-    return res.json({courses})
+const isId = (id) => mongoose.Types.ObjectId.isValid(id);
+const ownsCourse = (course, user) => String(course.createdBy?._id || course.createdBy) === String(user._id);
+const isEnrolled = (user, courseId) => user.subscription.some((id) => String(id) === String(courseId));
 
-})
-export const getSingleCourse=TryCatch(async(req,res)=>{
-    const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).json({ message: "Invalid course id" });
-    }
-    const course=await Course.findById(id);
-    return res.json({course})
+/** Lecture counts for a list of courses, as { courseId: count }. */
+const lectureCounts = async (courseIds) => {
+  const rows = await Lecture.aggregate([
+    { $match: { course: { $in: courseIds } } },
+    { $group: { _id: "$course", count: { $sum: 1 } } },
+  ]);
+  return Object.fromEntries(rows.map((r) => [String(r._id), r.count]));
+};
 
-})
-export const fetchLectures=TryCatch(async(req,res)=>{
-    const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).json({ message: "Invalid course id" });
-    }
-    const course=await Course.findById(id);
-    if(!course) return res.status(404).json({message:"No Course found"})
+const withCounts = async (courses) => {
+  const counts = await lectureCounts(courses.map((c) => c._id));
+  return courses.map((c) => ({ ...c.toObject(), lectureCount: counts[String(c._id)] || 0 }));
+};
 
-    
-    const user=await User.findById(req.user._id);
-    if(user.role==="admin"){
-        if(course.createdBy.toString()!==req.user._id.toString()){
-            return res.status(401).json({message:"Unauthorized,You cannot access this course"})
-        }
-        const lectures=await Lecture.find({course:id})
-        return res.json({lectures})
-    }
-    if(!user.subscription.includes(id))
-        return res.status(400).json({message:"You have not subscribed to this course"})
+export const getAllCourses = TryCatch(async (req, res) => {
+  const courses = await Course.find().sort({ createdAt: -1 }).populate("createdBy", "name");
+  res.json({ courses: await withCounts(courses) });
+});
 
-    const lectures=await Lecture.find({course:id})
-    return res.json({lectures})
-})
+export const getSingleCourse = TryCatch(async (req, res) => {
+  const { id } = req.params;
+  if (!isId(id)) return res.status(400).json({ message: "Invalid course id" });
 
+  const course = await Course.findById(id).populate("createdBy", "name");
+  if (!course) return res.status(404).json({ message: "Course not found" });
 
-export const fetchLecture=TryCatch(async(req,res)=>{
-    const lecture=await Lecture.findById(req.params.id);
-    const user=await User.findById(req.user._id);
-    const course=await Course.findById(lecture.course);
-    if(!course) return res.status(404).json({message:"No Course found"})
+  // Public curriculum: titles only, never video URLs.
+  const lectures = await Lecture.find({ course: id }).select("title").sort({ createdAt: 1 });
+  res.json({ course: { ...course.toObject(), lectureCount: lectures.length }, curriculum: lectures });
+});
 
-    if(user.role==="admin"){
-        if(course.createdBy.toString()!==req.user._id.toString()){
-            return res.status(401).json({message:"Unauthorized,You cannot access this course"})
-        }
-        return res.json({lecture})
-    }
-    if(!user.subscription.includes(lecture.course))
-        return res.status(400).json({message:"you have not subscribed to this user"})
-    res.json({lecture})
+export const fetchLectures = TryCatch(async (req, res) => {
+  const { id } = req.params;
+  if (!isId(id)) return res.status(400).json({ message: "Invalid course id" });
 
-})
-//get my course
-export const getMyCourses=TryCatch(async(req,res)=>{
-    let courses;
-    if(req.user.role==="admin"){
-        courses=await Course.find({createdBy:req.user._id});
-    }else{
-        courses=await Course.find({_id:{$in: req.user.subscription}})
-    }
-   
-   
-    return res.json({courses})
-})
+  const course = await Course.findById(id);
+  if (!course) return res.status(404).json({ message: "Course not found" });
 
-export const checkout=TryCatch(async(req,res)=>{
-    const user=await User.findById(req.user._id);
-    const course=await Course.findById(req.params.id);
-    if(!user) return res.status(404).json({message:"No User found"})
-    if(!course) return res.status(404).json({message:"No Course found"})
-        
-    if(user.subscription.includes(course._id)){
-        return res.status(400).json({message:"You already have this course"})
-    }
+  if (!ownsCourse(course, req.user) && !isEnrolled(req.user, id)) {
+    return res.status(403).json({ message: "Enroll in this course to watch its lectures" });
+  }
 
-    if (!instance) {
-        return res.status(503).json({ message: "Payment service is not configured. Please set Razorpay keys." });
-    }
+  const lectures = await Lecture.find({ course: id }).sort({ createdAt: 1 });
+  res.json({ lectures });
+});
 
-    const options={
-        amount:Number(course.price * 100),
-        currency:"INR", 
-    }
-    
-    const order=await instance.orders.create(options);
+export const fetchLecture = TryCatch(async (req, res) => {
+  if (!isId(req.params.id)) return res.status(400).json({ message: "Invalid lecture id" });
 
-//Ab yahan Razorpay ke system me ek order create ho gaya.
-//Razorpay tumhe ek order_id dega (like: order_12345).
-//Ye ek slip/receipt hai jo confirm karta hai ki Razorpay ne order register kar liya.
-//Ye order aur course frontend ko bhej diya jata hai.
+  const lecture = await Lecture.findById(req.params.id);
+  if (!lecture) return res.status(404).json({ message: "Lecture not found" });
 
+  const course = await Course.findById(lecture.course);
+  if (!course) return res.status(404).json({ message: "Course not found" });
 
-/*Ab tak ka step:
+  if (!ownsCourse(course, req.user) && !isEnrolled(req.user, course._id)) {
+    return res.status(403).json({ message: "Enroll in this course to watch its lectures" });
+  }
+  res.json({ lecture });
+});
 
-User: “Mujhe ye course chahiye.”
+export const getMyCourses = TryCatch(async (req, res) => {
+  const filter = req.user.role === "admin" ? { createdBy: req.user._id } : { _id: { $in: req.user.subscription } };
+  const courses = await Course.find(filter).sort({ createdAt: -1 }).populate("createdBy", "name");
+  res.json({ courses: await withCounts(courses) });
+});
 
-Backend: “Ok, Razorpay me order bana diya, ye slip lo aur payment karo.”  */
-    res.status(201).json({order,course})
+export const checkout = TryCatch(async (req, res) => {
+  if (!isId(req.params.id)) return res.status(400).json({ message: "Invalid course id" });
 
-})
-export const paymentVerification=TryCatch(async(req,res)=>{
-    const {razorpay_order_id,razorpay_payment_id,razorpay_signature}=req.body;
-    const body=razorpay_order_id + "|" +razorpay_payment_id;
-    const expectedSignature=crypto.createHmac("sha256",
-        process.env.RAZORPAY_KEY_SECRET).update(body).digest("hex")
-    
-    const isAuthentic=expectedSignature===razorpay_signature;
+  const user = await User.findById(req.user._id);
+  const course = await Course.findById(req.params.id);
+  if (!course) return res.status(404).json({ message: "Course not found" });
 
-    if(isAuthentic){
-        await Payment.create({
-            razorpay_order_id,
-            razorpay_payment_id,
-            razorpay_signature,
-        })
-        const user=await User.findById(req.user._id)
-        const course=await Course.findById(req.params.id)
-        user.subscription.push(course._id);
-        await user.save();
-        res.status(200).json({message:"Course purchased successfully"})
+  if (ownsCourse(course, user)) return res.status(400).json({ message: "You created this course" });
+  if (isEnrolled(user, course._id)) return res.status(400).json({ message: "You're already enrolled" });
 
-    }else{
-        return res.status(400).json({message:"Payment failed"})
-    }
+  // Free courses: enroll straight away, no payment needed.
+  if (!course.price || Number(course.price) <= 0) {
+    user.subscription.push(course._id);
+    await user.save();
+    return res.status(200).json({ free: true, message: "You're enrolled!" });
+  }
 
-})
+  if (!razorpay) {
+    return res.status(503).json({ message: "Payments are not configured on the server yet" });
+  }
+
+  const order = await razorpay.orders.create({
+    amount: Math.round(Number(course.price) * 100),
+    currency: "INR",
+    receipt: `c_${String(course._id).slice(-8)}_${Date.now()}`,
+    notes: { courseId: String(course._id), userId: String(user._id) },
+  });
+
+  res.status(201).json({ order, course, key: process.env.RAZORPAY_KEY_ID });
+});
+
+export const paymentVerification = TryCatch(async (req, res) => {
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    return res.status(400).json({ message: "Missing payment details" });
+  }
+
+  const expected = crypto
+    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET || "")
+    .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+    .digest("hex");
+
+  if (expected !== razorpay_signature) {
+    return res.status(400).json({ message: "Payment verification failed" });
+  }
+
+  const course = await Course.findById(req.params.id);
+  if (!course) return res.status(404).json({ message: "Course not found" });
+
+  const user = await User.findById(req.user._id);
+
+  await Payment.updateOne(
+    { razorpay_payment_id },
+    {
+      $setOnInsert: {
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature,
+        user: user._id,
+        course: course._id,
+        amount: course.price,
+      },
+    },
+    { upsert: true }
+  );
+
+  if (!isEnrolled(user, course._id)) {
+    user.subscription.push(course._id);
+    await user.save();
+  }
+
+  res.status(200).json({ message: "Payment successful — you're enrolled!" });
+});

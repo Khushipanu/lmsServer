@@ -1,54 +1,52 @@
 import fs from "fs";
 import path from "path";
+import { getClientUrls, isCloudinaryConfigured, isGoogleConfigured } from "./config.js";
+import { getEmailProvider } from "../middlewares/sendMail.js";
 
-const requiredEnv = [
-  "MONGODB_URI",
-  "JWT_SECRET_KEY",
-  "ACTIVATION_SECRET",
-  "FORGOT_SECRET_KEY",
-];
+const requiredEnv = ["MONGODB_URI", "JWT_SECRET_KEY", "ACTIVATION_SECRET", "FORGOT_SECRET_KEY"];
 
-const oauthEnv = ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_CALLBACK_URL"];
-const mailEnv = ["BREVO_API_KEY", "EMAIL_FROM"];
-const paymentEnv = ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"];
+/** Summary of which integrations are configured (no secrets). Also served on /health. */
+export function getServiceStatus() {
+  return {
+    email: getEmailProvider() || "not configured",
+    googleOAuth: isGoogleConfigured(),
+    payments: Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
+    ai: Boolean(process.env.GEMINI_API_KEY),
+    fileStorage: isCloudinaryConfigured() ? "cloudinary" : "local disk",
+  };
+}
 
 export function checkEnv() {
-  console.log("\n🔍 Environment Check\n");
+  console.log("\n🔍 Environment check");
 
   const missing = requiredEnv.filter((key) => !process.env[key]);
   if (missing.length) {
-    console.warn("⚠️  Missing required env vars:", missing.join(", "));
+    console.error("❌ Missing REQUIRED env vars:", missing.join(", "));
   } else {
     console.log("✅ Required env vars present");
   }
 
-  const oauthMissing = oauthEnv.filter((key) => !process.env[key]);
-  if (oauthMissing.length) {
-    console.warn("⚠️  Google OAuth may not work. Missing:", oauthMissing.join(", "));
-  } else {
-    console.log("✅ Google OAuth configured");
-  }
+  const status = getServiceStatus();
+  console.log("🌐 Allowed frontend origins:", getClientUrls().join(", "));
+  console.log(
+    status.email === "not configured"
+      ? "⚠️  Email not configured — set BREVO_API_KEY (recommended on Render), RESEND_API_KEY or SMTP_* vars"
+      : `✅ Email provider: ${status.email}`
+  );
+  console.log(
+    status.googleOAuth
+      ? `✅ Google OAuth configured (callback: ${process.env.GOOGLE_CALLBACK_URL || "derived from request host"})`
+      : "⚠️  Google OAuth disabled — set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET"
+  );
+  console.log(status.payments ? "✅ Razorpay configured" : "⚠️  Razorpay disabled — paid checkout will fail");
+  console.log(status.ai ? "✅ Gemini AI configured" : "⚠️  GEMINI_API_KEY missing — AI tutor disabled");
+  console.log(
+    status.fileStorage === "cloudinary"
+      ? "✅ Uploads go to Cloudinary"
+      : "⚠️  Uploads stored on local disk — on Render these are DELETED on every restart/deploy. Set CLOUDINARY_URL."
+  );
 
-  const mailMissing = mailEnv.filter((key) => !process.env[key]);
-  if (mailMissing.length) {
-    console.warn("⚠️  Email sending may not work. Missing:", mailMissing.join(", "));
-  } else {
-    console.log("✅ Email (Brevo) configured");
-  }
-
-  const paymentMissing = paymentEnv.filter((key) => !process.env[key]);
-  if (paymentMissing.length) {
-    console.warn("⚠️  Razorpay may not work. Missing:", paymentMissing.join(", "));
-  } else {
-    console.log("✅ Razorpay configured");
-  }
-
-  // Ensure uploads directory exists
   const uploadsDir = path.join(process.cwd(), "uploads");
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-    console.log("📁 Created uploads directory");
-  }
-
+  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
   console.log("");
 }

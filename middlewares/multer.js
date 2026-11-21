@@ -1,19 +1,32 @@
-//store krega videos and image ko
-import multer from "multer"
-import {v4 as uuid} from "uuid"
+// Accepts a single upload in the "file" field. Files are first written to
+// disk; utils/storage.js then moves them to Cloudinary when configured.
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { v4 as uuid } from "uuid";
 
-//multiple users photo.jpg krke save kre toh overwrite na ho isliye uuid unique id for every uploaded photo
+const UPLOAD_DIR = path.join(process.cwd(), "uploads");
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads')  //it ll be saved in this location
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || "";
+    cb(null, `${uuid()}${ext}`);
   },
-  filename: function (req, file, cb) {
-    const id=uuid();
+});
 
-    const extName=file.originalname.split(".").pop();  //original file ka extendsion like .png .mp4
-    const fileName=`${id}.${extName}`
-    cb(null,fileName)
-  }
-})
-const uploadFiles = multer({ storage}).single("file")
+const fileFilter = (req, file, cb) => {
+  if (/^(image|video)\//.test(file.mimetype)) return cb(null, true);
+  const err = new Error("Only image and video files are allowed");
+  err.status = 400;
+  cb(err);
+};
+
+const uploadFiles = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: Number(process.env.MAX_UPLOAD_MB || 200) * 1024 * 1024 },
+}).single("file");
+
 export default uploadFiles;
